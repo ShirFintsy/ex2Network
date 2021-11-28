@@ -20,21 +20,20 @@ if len(sys.argv) < 6:
 else:
     client_id = sys.argv[5]
 
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-
-def notify_created(is_dir, new_path):
-    print("created")
+def notify_created(is_dir, new_path, sock):
     mode = "created"
     curr_update = mode + ',' + str(is_dir) + ',' + new_path
-    # server_socket.sendall(curr_update.encode() + b'\n')
-    # send "created"
-    # send if is dir
-    # if so - send name (path)
-    # if not - send open and send file
+    print(curr_update)
+    with sock:
+        sock.sendall(curr_update.encode() + b'\n')
+
+        if not is_dir:
+            new_path = os.path.join(path, new_path)
+            send_file(sock, new_path)
 
 
-def notify_deleted(old_path):
+def notify_deleted(old_path, sock):
     print("deleted")
     mode = "deleted"
     curr_update = mode + ',' + old_path
@@ -45,7 +44,7 @@ def notify_deleted(old_path):
     pass
 
 
-def notify_moved(src_path, dest_path):
+def notify_moved(src_path, dest_path, sock):
     print("moved")
     # send "moved"
     # send src_path
@@ -53,8 +52,8 @@ def notify_moved(src_path, dest_path):
     pass
 
 
-def notify_modified(is_dir, modified_path):
-    print("modified")
+def notify_modified(is_dir, modified_path, sock):
+    # print("modified")
     # send "modified"
     # send if is dir
     # if so - send name (path)
@@ -62,28 +61,54 @@ def notify_modified(is_dir, modified_path):
     pass
 
 
-def notify_server(event, event_type, src_path):
+def notify_server(event, event_type, src_path, sock):
 
     if event_type == "created":
-        notify_created(event.is_directory, src_path)
+        notify_created(event.is_directory, src_path, sock)
 
     if event_type == "deleted":
-        notify_deleted(src_path)
+        notify_deleted(src_path, sock)
 
     if event_type == "moved":
         dest_path = event.dest_path.split(main_dir, 1)[1]
-        notify_moved(src_path, dest_path)
+        notify_moved(src_path, dest_path, sock)
 
     if event_type == "modified":
-        notify_modified(event.is_directory, src_path)
+        notify_modified(event.is_directory, src_path, sock)
 
 
 def on_any_event(event):
-    # server_socket.connect((server_ip, server_port))
-    print("do update")
+    if (event.event_type == "modified"):
+        return
+    update_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    update_socket.connect((server_ip, server_port))
+    update_socket.sendall(client_id.encode() + b'\n')  # send client id
+    update_socket.sendall(client_comp.encode() + b'\n')  # send client id
     src_path = event.src_path.split(main_dir, 1)[1]  # the only relative path in the server
-    notify_server(event, event.event_type, src_path)
-    # server_socket.close()
+    notify_server(event, event.event_type, src_path, update_socket)
+    server_socket.close()
+
+
+def send_file(on_sock, src_path):
+    with on_sock:
+        filename = src_path
+        relpath = os.path.basename(filename)  # get file name from my_dir (file path)
+        filesize = os.path.getsize(filename)
+
+        print(f'Sending {relpath}')
+
+        with open(filename, 'rb') as f:
+            on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
+            on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
+
+            # Send the file in chunks so large files can be handled.
+            while True:
+                data = f.read(CHUNKSIZE)
+                if not data:
+                    break
+                on_sock.sendall(data)
+
+print('Done.')
 
 
 def send_files(on_sock, src_path):  # type - socket
@@ -142,6 +167,7 @@ def get_my_files(client_file):  # type - makefile('rb')
 
 
 if __name__ == "__main__":
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.connect((server_ip, server_port))
     get_data_sock = server_socket.makefile(mode='rb')
 
