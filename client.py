@@ -10,7 +10,7 @@ CHUNKSIZE = 1_000_000
 server_ip = sys.argv[1]
 server_port = int(sys.argv[2])
 path = sys.argv[3]
-time_step = int(sys.argv[4])
+cycle = int(sys.argv[4])
 client_id = ''
 client_comp = "-1"
 
@@ -23,42 +23,31 @@ else:
 
 def notify_created(is_dir, new_path, sock):
     mode = "created"
+    if os.path.splitext(new_path)[1] == ".swp":
+        return
     curr_update = mode + ',' + str(is_dir) + ',' + new_path
     print(curr_update)
     with sock:
         sock.sendall(curr_update.encode() + b'\n')
-
         if not is_dir:
             new_path = os.path.join(path, new_path)
             send_file(sock, new_path)
 
 
-def notify_deleted(old_path, sock):
-    print("deleted")
+def notify_deleted(is_dir, old_path, sock):
     mode = "deleted"
-    curr_update = mode + ',' + old_path
-    # server_socket.sendall(client_id.encode('utf-8'))
-    # server_socket.sendall(curr_update.encode() + b'\n')
-    # send "deleted"
-    # send old_path
-    pass
+    if os.path.splitext(old_path)[1] == ".swp":
+        # os.path.join(os.path.dirname((os.path.splitext(d)[0])), (os.path.splitext(d)[0].split(os.sep)[-1])[1:]) #TODO!
+    curr_update = mode + ',' + str(is_dir) + ',' + old_path
+    with sock:
+        sock.sendall(curr_update.encode() + b'\n')
 
 
-def notify_moved(src_path, dest_path, sock):
-    print("moved")
-    # send "moved"
-    # send src_path
-    # send old_path
-    pass
-
-
-def notify_modified(is_dir, modified_path, sock):
-    # print("modified")
-    # send "modified"
-    # send if is dir
-    # if so - send name (path)
-    # if not - send open and send file
-    pass
+def notify_moved(is_dir, src_path, dest_path, sock):
+    mode = "moved"
+    curr_update = mode + ',' + str(is_dir) + ',' + src_path + ',' + dest_path
+    with sock:
+        sock.sendall(curr_update.encode() + b'\n')
 
 
 def notify_server(event, event_type, src_path, sock):
@@ -67,23 +56,22 @@ def notify_server(event, event_type, src_path, sock):
         notify_created(event.is_directory, src_path, sock)
 
     if event_type == "deleted":
-        notify_deleted(src_path, sock)
+        notify_deleted(event.is_directory, src_path, sock)
 
     if event_type == "moved":
         dest_path = event.dest_path.split(main_dir, 1)[1]
-        notify_moved(src_path, dest_path, sock)
+        notify_moved(event.is_directory, src_path, dest_path, sock)
 
     if event_type == "modified":
         notify_modified(event.is_directory, src_path, sock)
 
 
 def on_any_event(event):
-    if (event.event_type == "modified"):
-        return
     update_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     update_socket.connect((server_ip, server_port))
     update_socket.sendall(client_id.encode() + b'\n')  # send client id
     update_socket.sendall(client_comp.encode() + b'\n')  # send client id
+    update_socket.sendall("push".encode() + b'\n')
     src_path = event.src_path.split(main_dir, 1)[1]  # the only relative path in the server
     notify_server(event, event.event_type, src_path, update_socket)
     server_socket.close()
@@ -108,12 +96,13 @@ def send_file(on_sock, src_path):
                     break
                 on_sock.sendall(data)
 
-print('Done.')
 
-
-def send_files(on_sock, src_path):  # type - socket
+def send_files(on_sock, src_path):  # type - socket #send file and empty dirs
     with on_sock:
         for root, dirs, files in os.walk(src_path):
+            # for dir in dirs:
+            #     if not os.listdir(dir):
+            #         on_sock.sendall(root + os.sep + dir + '\n')
             for file in files:
                 filename = os.path.join(root, file)
                 relpath = os.path.relpath(filename, src_path)  # get file name from my_dir (file path)
@@ -131,6 +120,16 @@ def send_files(on_sock, src_path):  # type - socket
                         if not data:
                             break
                         on_sock.sendall(data)
+        # send \n for notify from now we send empty files:
+
+        on_sock.sendall("finito".encode('utf-8') + b'\n')
+        for root, dirs, files in os.walk(path):
+            for dir in dirs:
+                d = os.path.join(root, dir)
+                if not os.listdir(d):
+                    d = os.path.relpath(d, path)
+                    print(d)
+                    on_sock.sendall(d.encode() + b'\n')
         print('Done.')
 
 
@@ -165,6 +164,8 @@ def get_my_files(client_file):  # type - makefile('rb')
         break
     client_file.close()
 
+def pull(on_sock):
+    pass
 
 if __name__ == "__main__":
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -211,9 +212,17 @@ if __name__ == "__main__":
 
     # start the Observer:
     my_observer.start()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        my_observer.stop()
-        my_observer.join()
+    while True:
+        time.sleep(cycle)
+        pull_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        pull_socket.connect((server_ip, server_port))
+        pull_socket.sendall(client_id.encode() + b'\n')  # send client id
+        pull_socket.sendall(client_comp.encode() + b'\n')  # send client comp
+        pull_socket.sendall("pull".encode() +b'\n')
+        pull(pull_socket.makefile('rb'))
+    # try:
+    #     while True:
+    #         time.sleep(1)
+    # except KeyboardInterrupt:
+    #     my_observer.stop()
+    #     my_observer.join()

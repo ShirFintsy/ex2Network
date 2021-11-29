@@ -4,7 +4,7 @@ import sys
 import time
 from watchdog.observers import polling
 from watchdog.events import PatternMatchingEventHandler
-path = "/home/bob/temp"
+path = "/home/shir25/Pictures"
 
 
 def notify_created(is_dir, new_path):
@@ -21,15 +21,12 @@ def notify_deleted(old_path):
 
 def notify_moved(src_path, dest_path):
     mode = "moved"
-    curr_update = mode + ',' + src_path + ',' + dest_path
-    print(curr_update)
+    is_rename = not os.path.exists(os.path.basename(dest_path))
+    # if a file has been renamed - regular move
 
-
-def notify_modified(is_dir, modified_path):
-    mode = "modified"
-    curr_update = mode + ',' + modified_path
+    is_rename = not (os.path.exists(src_path) and os.path.exists(dest_path))
+    curr_update = mode + ',' + str(is_rename) + ',' + src_path + ',' + dest_path
     print(curr_update)
-    print("modified")
 
 
 def notify_server(event, event_type, src_path):
@@ -41,11 +38,7 @@ def notify_server(event, event_type, src_path):
         notify_deleted(src_path)
 
     if event_type == "moved":
-        dest_path = event.dest_path.split(main_dir, 1)[1]
-        notify_moved(src_path, dest_path)
-
-    if event_type == "modified":
-        notify_modified(event.is_directory, src_path)
+        notify_moved(src_path, event.dest_path)
 
 
 def on_any_event(event):
@@ -88,12 +81,3 @@ if __name__ == "__main__":
 
 
 
-# # path_to_del = "/home/bob/temp (copy)"
-# # for root, dirs, files in os.walk(path_to_del, topdown=False):
-# #     for file in files:
-# #         file_path = os.path.join(root, file)
-# #         os.remove(file_path)
-# #     for dir in dirs:
-# #         dir_path = os.path.join(root, dir)
-# #         os.rmdir(dir_path)
-# # os.rmdir(path_to_del)

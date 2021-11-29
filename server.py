@@ -13,7 +13,7 @@ data_base = {}
 # open server
 main_socket = socket()
 main_socket.bind(('', port))
-main_socket.listen(5)
+main_socket.listen(100)
 
 
 # return random string with 128 characters compared of letters and numbers.
@@ -25,35 +25,47 @@ def get_random_id(id_set):
 
 
 def init_client_files(get_files_sock):
+    line = " "
     while True:
-        line = get_files_sock.readline()
         if not line:
             break  # no more files, client closed connection.
+        line = get_files_sock.readline()
 
-        filename = line.strip().decode()
-        length = int(get_files_sock.readline())
-        print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
-
-        file_path = os.path.join('AllClients', str(client_id))
-        file_path = os.path.join(file_path, filename)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-        # Read the data in chunks so it can handle large files.
-        with open(file_path, 'wb') as f:
-            while length:
-                chunk = min(length, CHUNKSIZE)
-                data = get_files_sock.read(chunk)
-                if not data:
+        if line.strip().decode() == "finito":
+            while True:
+                line = get_files_sock.readline()
+                if not line:
                     break
-                f.write(data)
-                length -= len(data)
-            else:  # only runs if while doesn't break and length==0
-                print('Complete')
-                continue
+                dir_name = line.strip().decode()
+                print(f'empty dir {dir_name} ... \n', end='', flush=True)
+                dir_path = os.path.join('AllClients', str(client_id))
+                dir_path = os.path.join(dir_path, dir_name)
+                os.mkdir(dir_path)
+        else:
+            filename = line.strip().decode()
+            length = int(get_files_sock.readline())
+            print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
 
-        # socket was closed early.
-        print('Incomplete')
-        break
+            file_path = os.path.join('AllClients', str(client_id))
+            file_path = os.path.join(file_path, filename)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # Read the data in chunks so it can handle large files.
+            with open(file_path, 'wb') as f:
+                while length:
+                    chunk = min(length, CHUNKSIZE)
+                    data = get_files_sock.read(chunk)
+                    if not data:
+                        break
+                    f.write(data)
+                    length -= len(data)
+                else:  # only runs if while doesn't break and length==0
+                    print('Complete')
+                    continue
+
+            # socket was closed early.
+            print('Incomplete')
+            break
 
 
 def send_files(on_socket, src_dir):
@@ -112,7 +124,6 @@ def get_my_files(client_file, curr_path):  # type - makefile('rb')
         print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
 
         file_path = os.path.join(curr_path, filename)
-        # os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         # Read the data in chunks so it can handle large files.
         with open(file_path, 'wb') as f:
@@ -142,6 +153,57 @@ def get_comp_num(c_id):
         data_base[c_id] = {}
         data_base[c_id][c_comp] = None
     return c_comp
+
+
+def get_update(command, get_data_sock):
+    if command[0] == "created":
+        is_dir, src_path = command[1], command[2]
+        src_path = os.path.join(clients_id_path[client_id], src_path)
+        if is_dir == "True" and not os.path.exists(src_path):
+            os.mkdir(src_path)
+            print("created dir")
+        elif is_dir == "False":
+            get_file(get_data_sock, src_path)
+
+    if command[0] == "deleted":
+        is_dir, del_path = command[1], command[2]
+        del_path = os.path.join(clients_id_path[client_id], del_path)
+        if is_dir == "True":
+            if not os.listdir(del_path):
+                print("error")
+            os.rmdir(del_path)
+        else:
+            os.remove(del_path)
+
+    if command[0] == "moved":
+        is_dir, src_path, dest_path = command[1], command[2], command[3]
+        src_path = os.path.join(clients_id_path[client_id], src_path)
+        dest_path = os.path.join(clients_id_path[client_id], dest_path)
+        if is_dir == "False":
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            os.replace(src_path, dest_path)
+        else:
+            delete_dir(src_path)
+            if not os.path.exists(dest_path):
+                os.mkdir(dest_path)
+
+
+def update_computers(c_id, c_comp, command):
+    for k in data_base[c_id].keys():
+        if k != c_comp:
+            data_base[c_id][k].add(command)
+
+def delete_dir(path_to_del):
+    if not os.path.exists(path_to_del):
+        return
+    for root, dirs, files in os.walk(path_to_del, topdown=False):
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+    os.rmdir(path_to_del)
 
 
 if __name__ == "__main__":
@@ -186,20 +248,23 @@ if __name__ == "__main__":
 
             # computer reconnect with id and comp number:
             else:
-                # already signed computer- check if there are updates:
-                if data_base[client_id][client_comp]:  # check if there are some updates
-                    updates = data_base[client_id][client_comp]  # list of updates
-                    # TODO: share the updates to this computer
-                # waiting for updates
-                command = get_data_sock.readline().strip().decode().split(',')
-                if command[0] == "created":
-                    is_dir, src_path = command[1], command[2]
-                    src_path = os.path.join(clients_id_path[client_id], src_path)
-                    if is_dir == "True" and not os.path.exists(src_path):
-                        os.mkdir(src_path)
-                        print("created dir")
-                    elif is_dir == "False":
-                        get_file(get_data_sock, src_path)
+                pull_push = get_data_sock.readline().strip().decode()
+                if pull_push == "pull":
+                    # already signed computer- check if there are updates:
+                    if data_base[client_id][client_comp]:  # check if there are some updates
+                        updates = data_base[client_id][client_comp]  # list of updates
+                        # TODO: share the updates to this computer
+                    else:
+                        client_socket.sendall("no updates".encode() + b'\n')
+
+                    pass
+                elif pull_push == "push":
+                    # waiting for updates
+                    command = get_data_sock.readline().strip().decode().split(',')
+                    update_computers(client_id, client_comp, command)
+                    get_update(command, get_data_sock)
+
+
 
 
 
