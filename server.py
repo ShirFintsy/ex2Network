@@ -8,7 +8,7 @@ CHUNKSIZE = 1_000_000
 port = int(sys.argv[1])
 
 clients_id_path = {}  # create dictionary that maps id to path in the server.
-data_base = {"318646072":{"1":["command_1", "command_2"]}}  #TODO: delete this ?
+data_base = {}
 
 # open server
 main_socket = socket()
@@ -136,14 +136,34 @@ def get_file(on_socket, file_path):  # type - makefile('rb')
             print('Complete')
 
 
+def send_file(on_sock, src_path):
+    with on_sock:
+        filename = src_path
+        relpath = os.path.basename(filename)  # get file name from my_dir (file path)
+        filesize = os.path.getsize(filename)
+
+        print(f'Sending {relpath}')
+
+        with open(filename, 'rb') as f:
+            on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
+            on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
+
+            # Send the file in chunks so large files can be handled.
+            while True:
+                data = f.read(CHUNKSIZE)
+                if not data:
+                    break
+                on_sock.sendall(data)
+
+
 def get_comp_num(c_id):
     if data_base.keys().__contains__(c_id):  # check if the ID exists
         c_comp = str(len(data_base[c_id]) + 1)
-        data_base[c_id][c_comp] = None  # new computer has joined the data base.
+        data_base[c_id][c_comp] = []  # new computer has joined the data base.
     else:
         c_comp = "1"
         data_base[c_id] = {}
-        data_base[c_id][c_comp] = None
+        data_base[c_id][c_comp] = []
     return c_comp
 
 
@@ -183,7 +203,7 @@ def get_update(command, get_data_sock):
 def update_computers(c_id, c_comp, cmd):
     for k in data_base[c_id].keys():
         if k != c_comp:
-            data_base[c_id][k].add(cmd)
+            list((data_base[c_id][k])).append(str(cmd))
 
 
 def delete_dir(path_to_del):
@@ -199,9 +219,24 @@ def delete_dir(path_to_del):
     os.rmdir(path_to_del)
 
 
-def send_update(cmd, on_sock):
-    # TODO: map command to relevant func.
-    pass
+def send_update(cmd, c_path, on_sock):
+    cmd_type = cmd.split(',', 1)[0]
+    if cmd_type == "created":
+        notify_created(cmd, c_path, on_sock)
+    elif cmd_type == "deleted":
+        pass
+    elif cmd_type == "moved":
+        pass
+
+
+def notify_created(curr_update, c_path, on_sock):
+    mode, is_dir, new_path = curr_update
+    print(curr_update)
+    with on_sock:
+        on_sock.sendall(curr_update.encode() + b'\n')
+        if is_dir == "False":
+            new_path = os.path.join(c_path, new_path)
+            send_file(on_sock, new_path)
 
 
 if __name__ == "__main__":
@@ -242,7 +277,7 @@ if __name__ == "__main__":
             client_dir_path = clients_id_path[client_id]  # search for path in AllClients folders
             if client_comp == "-1":
                 client_comp = get_comp_num(client_id)  # also update the database
-                client_socket.sendall(client_comp.encode('utf-8') + b'\n')  # send new Computer number
+                client_socket.sendall(client_comp.encode() + b'\n')  # send new Computer number
                 client_socket.sendall(sys.platform.encode() + b'\n')  # send server op name.
                 send_files(client_socket, client_dir_path)
 
@@ -255,17 +290,17 @@ if __name__ == "__main__":
                         status = str(len(data_base[client_id][client_comp])) + "To go"
                         client_socket.sendall(status.encode() + b'\n')
                         update = data_base[client_id][client_comp].pop
-                        send_update(update, client_socket)
+                        send_update(update, client_dir_path, client_socket)
                         # TODO: share the updates to this computer
                     else:
                         client_socket.sendall("No updates".encode() + b'\n')
 
-                    pass
                 elif connection_type == "push":
                     # waiting for updates
-                    command = get_data_sock.readline().strip().decode().split(',')
+                    command_txt = get_data_sock.readline().strip().decode()
+                    command = str(command_txt).split(',')
                     get_update(command, get_data_sock)
-                    update_computers(client_id, client_comp, command)
+                    update_computers(client_id, client_comp, command_txt)
 
 
 
