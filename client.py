@@ -115,7 +115,7 @@ def get_files(get_files_sock):
                 dir_name = get_path(server_op, dir_name)
                 print(f'empty dir {dir_name} ... \n', end='', flush=True)
                 dir_path = os.path.join(path, dir_name)
-                os.mkdir(dir_path)
+                os.makedirs(dir_path, exist_ok=True)
         else:
             filename = line.strip().decode()
             filename = get_path(server_op, filename)
@@ -162,6 +162,7 @@ def send_file(on_sock, src_path):
                 if not data:
                     break
                 on_sock.sendall(data)
+
 
 # Observer - check for changes:
 
@@ -244,6 +245,8 @@ def get_update(cmd, on_sock):
     if cmd[0] == "created":
         is_dir, src_path = cmd[1], cmd[2]
         src_path = os.path.join(path, src_path)
+        if os.path.exists(src_path):
+            return
         if is_dir == "True" and not os.path.exists(src_path):
             os.mkdir(src_path)
             print("created dir")
@@ -253,6 +256,8 @@ def get_update(cmd, on_sock):
     elif cmd[0] == "deleted":
         is_dir, del_path = cmd[1], cmd[2]
         del_path = os.path.join(path, del_path)
+        if not os.path.exists(del_path):
+            return
         if is_dir == "True":
             if os.listdir(del_path):
                 print("error")
@@ -264,6 +269,8 @@ def get_update(cmd, on_sock):
         is_dir, src_path, dest_path = cmd[1], cmd[2], cmd[3]
         src_path = os.path.join(path, src_path)
         dest_path = os.path.join(path, dest_path)
+        # if os.path.exists(dest_path) and not os.path.exists(src_path):
+        #     return
         if is_dir == "False":
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             os.replace(src_path, dest_path)
