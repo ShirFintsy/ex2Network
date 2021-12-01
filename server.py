@@ -8,7 +8,7 @@ CHUNKSIZE = 1_000_000
 port = int(sys.argv[1])
 
 clients_id_path = {}  # create dictionary that maps id to path in the server.
-data_base = {}
+data_base = {"318646072":{"1":["command_1", "command_2"]}}  #TODO: delete this ?
 
 # open server
 main_socket = socket()
@@ -16,22 +16,33 @@ main_socket.bind(('', port))
 main_socket.listen(100)
 
 
+# This function set the path sep to '\\' in case of windows path and '/' otherwise.
+# Because most of the operation systems works with linux sep - we set the src sep to '/' by default.
+def get_path(src_platform, src_path, src_sep='/'):
+    if src_platform == 'win32':
+        src_sep = '\\'
+    if os.sep != src_sep:
+        src_path = src_path.replace(src_sep, os.sep)
+    return src_path
+
+
+# TODO change id length to 128 characters
 # return random string with 128 characters compared of letters and numbers.
 def get_random_id(id_set):
-    new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=128))
+    new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     while new_id in id_set:
-        new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=128))
+        new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
     return new_id
 
 
-def init_client_files(get_files_sock):
+def get_files(get_files_sock):
     line = " "
     while True:
         if not line:
             break  # no more files, client closed connection.
         line = get_files_sock.readline()
 
-        if line.strip().decode() == "finito":
+        if line.strip().decode() == "empty dirs:":
             while True:
                 line = get_files_sock.readline()
                 if not line:
@@ -40,7 +51,7 @@ def init_client_files(get_files_sock):
                 print(f'empty dir {dir_name} ... \n', end='', flush=True)
                 dir_path = os.path.join('AllClients', str(client_id))
                 dir_path = os.path.join(dir_path, dir_name)
-                os.mkdir(dir_path)
+                os.makedirs(dir_path, exist_ok=True)
         else:
             filename = line.strip().decode()
             length = int(get_files_sock.readline())
@@ -66,29 +77,41 @@ def init_client_files(get_files_sock):
             # socket was closed early.
             print('Incomplete')
             break
+    get_files_sock.close()
 
 
-def send_files(on_socket, src_dir):
-    for root, dirs, files in os.walk(src_dir):
-        for file in files:
-            filename = os.path.join(root, file)
-            relative_path = os.path.relpath(filename, src_dir)
-            file_size = os.path.getsize(filename)
+def send_files(on_sock, src_path):  # type - socket #send file and empty dirs
+    with on_sock:
+        for root, dirs, files in os.walk(src_path):
+            for file in files:
+                filename = os.path.join(root, file)
+                relpath = os.path.relpath(filename, src_path)  # get file name from my_dir (file path)
+                filesize = os.path.getsize(filename)
 
-            print(f'Sending {relative_path}')
+                print(f'Sending {relpath}')
 
-            with open(filename, 'rb') as f:
-                on_socket.sendall(relative_path.encode() + b'\n')  # send file name + subdirectory and '\n'.
-                on_socket.sendall(str(file_size).encode() + b'\n')  # send file size.
+                with open(filename, 'rb') as f:
+                    on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
+                    on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
 
-                # Send the file in chunks so large files can be handled.
-                while True:
-                    data = f.read(CHUNKSIZE)
-                    if not data:
-                        break
-                    on_socket.sendall(data)
-    on_socket.sendall("finito".encode('utf-8') + b'\n')
-    print('Done.')
+                    # Send the file in chunks so large files can be handled.
+                    while True:
+                        data = f.read(CHUNKSIZE)
+                        if not data:
+                            break
+                        on_sock.sendall(data)
+
+        # sending empty directories.
+        on_sock.sendall("empty dirs:".encode('utf-8') + b'\n')
+        for root, dirs, files in os.walk(src_path):
+            for directory in dirs:
+                d = os.path.join(root, directory)
+                if not os.listdir(d):
+                    d = os.path.relpath(d, src_path)
+                    print(d)
+                    on_sock.sendall(d.encode() + b'\n')
+        on_sock.sendall('Done.'.encode() + b'\n')
+        on_sock.close()
 
 
 def create_dirs(d_path):
@@ -113,37 +136,6 @@ def get_file(on_socket, file_path):  # type - makefile('rb')
             print('Complete')
 
 
-def get_my_files(client_file, curr_path):  # type - makefile('rb')
-    while True:
-        line = client_file.readline()
-        if line.strip().decode() == "finito":
-            break  # no more files, client closed connection.
-
-        filename = line.strip().decode()
-        length = int(client_file.readline())
-        print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
-
-        file_path = os.path.join(curr_path, filename)
-
-        # Read the data in chunks so it can handle large files.
-        with open(file_path, 'wb') as f:
-            while length:
-                chunk = min(length, CHUNKSIZE)
-                data = client_file.read(chunk)
-                if not data:
-                    break
-                f.write(data)
-                length -= len(data)
-            else:  # only runs if while doesn't break and length==0
-                print('Complete')
-                continue
-
-        # socket was closed early.
-        print('Incomplete')
-        break
-    client_file.close()
-
-
 def get_comp_num(c_id):
     if data_base.keys().__contains__(c_id):  # check if the ID exists
         c_comp = str(len(data_base[c_id]) + 1)
@@ -165,17 +157,17 @@ def get_update(command, get_data_sock):
         elif is_dir == "False":
             get_file(get_data_sock, src_path)
 
-    if command[0] == "deleted":
+    elif command[0] == "deleted":
         is_dir, del_path = command[1], command[2]
         del_path = os.path.join(clients_id_path[client_id], del_path)
         if is_dir == "True":
-            if not os.listdir(del_path):
+            if os.listdir(del_path):
                 print("error")
             os.rmdir(del_path)
         else:
             os.remove(del_path)
 
-    if command[0] == "moved":
+    elif command[0] == "moved":
         is_dir, src_path, dest_path = command[1], command[2], command[3]
         src_path = os.path.join(clients_id_path[client_id], src_path)
         dest_path = os.path.join(clients_id_path[client_id], dest_path)
@@ -188,10 +180,11 @@ def get_update(command, get_data_sock):
                 os.mkdir(dest_path)
 
 
-def update_computers(c_id, c_comp, command):
+def update_computers(c_id, c_comp, cmd):
     for k in data_base[c_id].keys():
         if k != c_comp:
-            data_base[c_id][k].add(command)
+            data_base[c_id][k].add(cmd)
+
 
 def delete_dir(path_to_del):
     if not os.path.exists(path_to_del):
@@ -204,6 +197,11 @@ def delete_dir(path_to_del):
             dir_path = os.path.join(root, dir)
             os.rmdir(dir_path)
     os.rmdir(path_to_del)
+
+
+def send_update(cmd, on_sock):
+    # TODO: map command to relevant func.
+    pass
 
 
 if __name__ == "__main__":
@@ -219,53 +217,56 @@ if __name__ == "__main__":
         get_data_sock = client_socket.makefile(mode='rb')
 
         print(f'Client joined from {address}')
-        # identification - get client's ID, comp number
+        # identification - get client's ID, computer number, op.
         client_id = get_data_sock.readline().strip().decode()
         client_comp = get_data_sock.readline().strip().decode()
+        client_op = get_data_sock.readline().strip().decode()
 
         client_dir_path = ''
-        if client_id == 'False':
+        if client_id == 'None':
             client_id = get_random_id(clients_id_path.keys())  # create client id
             client_comp = get_comp_num(client_id)  # also update the database
-            client_socket.sendall(client_id.encode('utf-8') + b'\n')
-            client_socket.sendall(
-                client_comp.encode('utf-8') + b'\n')  # notify the client that he is the first computer of this ID.
+            client_socket.sendall(client_id.encode() + b'\n')
+            client_socket.sendall(client_comp.encode() + b'\n')  # send new Computer number (will be 1).
+            client_socket.sendall(sys.platform.encode() + b'\n')  # send server op.
 
             # create & enter his folder name to the dictionary
             os.mkdir(os.path.join(allClients, client_id))
             clients_id_path[client_id] = os.path.join(allClients, client_id)
 
             # get files to server.
-            init_client_files(get_data_sock)
+            get_files(get_data_sock)
 
         # ID exists:
         else:
             client_dir_path = clients_id_path[client_id]  # search for path in AllClients folders
             if client_comp == "-1":
                 client_comp = get_comp_num(client_id)  # also update the database
-                client_socket.sendall(client_comp.encode('utf-8') + b'\n')
+                client_socket.sendall(client_comp.encode('utf-8') + b'\n')  # send new Computer number
+                client_socket.sendall(sys.platform.encode() + b'\n')  # send server op name.
                 send_files(client_socket, client_dir_path)
 
             # computer reconnect with id and comp number:
             else:
-                pull_push = get_data_sock.readline().strip().decode()
-                if pull_push == "pull":
+                connection_type = get_data_sock.readline().strip().decode()
+                if connection_type == "pull":
                     # already signed computer- check if there are updates:
-                    if data_base[client_id][client_comp]:  # check if there are some updates
-                        updates = data_base[client_id][client_comp]  # list of updates
+                    if data_base[client_id][client_comp]:  # check if there are updates
+                        status = str(len(data_base[client_id][client_comp])) + "To go"
+                        client_socket.sendall(status.encode() + b'\n')
+                        update = data_base[client_id][client_comp].pop
+                        send_update(update, client_socket)
                         # TODO: share the updates to this computer
                     else:
-                        client_socket.sendall("no updates".encode() + b'\n')
+                        client_socket.sendall("No updates".encode() + b'\n')
 
                     pass
-                elif pull_push == "push":
+                elif connection_type == "push":
                     # waiting for updates
                     command = get_data_sock.readline().strip().decode().split(',')
-                    update_computers(client_id, client_comp, command)
                     get_update(command, get_data_sock)
+                    update_computers(client_id, client_comp, command)
 
 
 
 
-
-            # if it is not a new client, and not a new computer than the client needs something. (push or pull)

@@ -1,15 +1,13 @@
 import os
 
-# path = '/home/shir25/Pictures'
-# for root, dirs, files in os.walk(path):
-#     for dir in dirs:
-#         print(root + os.sep + dir)
-#     for file in files:
-#         print(root + os.sep + file)
+# path = "/home/bob/Pictures"
+# src_path = "/home/bob/Pictures/bluh/Screenshot from 2021-11-18 05-12-27.png"
+# src_path = os.path.relpath(src_path, path)
+# print(src_path)
 
-        #print(p)
-d = "/home/shir25/Pictures/.asaf.txt.swp"
-path = "/home/shir25/Pictures"
-relpath = os.path.relpath(d, path)
-d = os.path.join(os.path.dirname((os.path.splitext(d)[0])), (os.path.splitext(d)[0].split(os.sep)[-1])[1:])
-print(d)
+file_path = "/home/bob/Pictures/.asaf.txt.swp"
+
+dir_name = os.path.dirname(file_path)
+swp_name = os.path.basename(file_path)
+file_name = swp_name[1:-4]
+print(file_name)
