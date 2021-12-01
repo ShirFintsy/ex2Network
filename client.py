@@ -43,7 +43,7 @@ def get_server_socket():
     new_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     new_socket.connect((server_ip, server_port))
     new_socket.sendall(client_id.encode() + b'\n')  # send client id
-    new_socket.sendall(client_comp.encode() + b'\n')  # send client id
+    new_socket.sendall(client_comp.encode() + b'\n')  # send client comp
     new_socket.sendall(sys.platform.encode() + b'\n')  # send client's op.
     return new_socket
 
@@ -163,7 +163,6 @@ def send_file(on_sock, src_path):
                     break
                 on_sock.sendall(data)
 
-
 # Observer - check for changes:
 
 def on_any_event(event):
@@ -233,6 +232,7 @@ def pull():
     pull_socket = get_pull_socket()
     update_socket = pull_socket.makefile('rb')
     status = update_socket.readline().strip().decode()
+    print(status)
     if status != "No updates":
         command = update_socket.readline().strip().decode().split(',')
         get_update(command, update_socket)
@@ -240,7 +240,71 @@ def pull():
 
 
 def get_update(cmd, on_sock):
-    pass
+    if cmd[0] == "created":
+        is_dir, src_path = cmd[1], cmd[2]
+        src_path = os.path.join(path, src_path)
+        if is_dir == "True" and not os.path.exists(src_path):
+            os.mkdir(src_path)
+            print("created dir")
+        elif is_dir == "False":
+            get_file(on_sock, src_path)
+
+    elif cmd[0] == "deleted":
+        is_dir, del_path = cmd[1], cmd[2]
+        del_path = os.path.join(path, del_path)
+        if is_dir == "True":
+            if os.listdir(del_path):
+                print("error")
+            os.rmdir(del_path)
+        else:
+            os.remove(del_path)
+
+    elif cmd[0] == "moved":
+        is_dir, src_path, dest_path = cmd[1], cmd[2], cmd[3]
+        src_path = os.path.join(path, src_path)
+        dest_path = os.path.join(path, dest_path)
+        if is_dir == "False":
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            os.replace(src_path, dest_path)
+        else:
+            delete_dir(src_path)
+            if not os.path.exists(dest_path):
+                os.mkdir(dest_path)
+
+
+def get_file(on_socket, file_path):  # type - makefile('rb')
+    file_name = on_socket.readline()
+    length = int(on_socket.readline())
+    create_dirs(os.path.dirname(file_path))
+    with open(file_path, 'wb') as f:
+        while length:
+            chunk = min(length, CHUNKSIZE)
+            data = on_socket.read(chunk)
+            if not data:
+                break
+            f.write(data)
+            length -= len(data)
+        else:  # only runs if while doesn't break and length==0
+            print('Complete')
+
+
+def create_dirs(d_path):
+    if not os.path.exists(d_path):
+        create_dirs(os.path.dirname(d_path))
+        os.mkdir(d_path)
+
+
+def delete_dir(path_to_del):
+    if not os.path.exists(path_to_del):
+        return
+    for root, dirs, files in os.walk(path_to_del, topdown=False):
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+    os.rmdir(path_to_del)
 
 
 # -------------------------------------------------------------------------------------------------------------------
