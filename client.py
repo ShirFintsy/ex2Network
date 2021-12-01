@@ -240,6 +240,7 @@ def pull():
 
 
 def get_update(cmd, on_sock):
+    print(f'command: {cmd}')
     if cmd[0] == "created":
         is_dir, src_path = cmd[1], cmd[2]
         src_path = os.path.join(path, src_path)
