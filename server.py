@@ -4,17 +4,26 @@ import sys
 import random
 import string
 
+# Globals: -----------------------------------------------------------------------------------------------
+
 CHUNKSIZE = 10_000_000
+server_has_changed = True  # global var that check if the server has been changed from last push request.
 port = int(sys.argv[1])
 
+# Dictionaries:
 clients_id_path = {}  # create dictionary that maps id to path in the server.
+
+# create dictionary that maps id to anothoer dictionary of computer number for clients
+# and its updated from others computer with the id:
 data_base = {}
-server_has_changed = True  # global var that check if the server has been changed from last push request.
-# open server
+
+# Open server:
 main_socket = socket()
 main_socket.bind(('', port))
-main_socket.listen(100)
+main_socket.listen(200)
 
+
+# Utils Functions: --------------------------------------------------------------------------------------------
 
 # This function set the path sep to '\\' in case of windows path and '/' otherwise.
 # Because most of the operation systems works with linux sep - we set the src sep to '/' by default.
@@ -34,6 +43,8 @@ def get_random_id(id_set):
     return new_id
 
 
+# Send and receive files: --------------------------------------------------------------------------------------
+
 # This function get from a new client without id the dirs and files in client path
 def get_files(get_files_sock):
     line = " "
@@ -49,7 +60,6 @@ def get_files(get_files_sock):
                     break
                 dir_name = line.strip().decode()
                 dir_name = get_path(client_op, dir_name)
-                print(f'empty dir {dir_name} ... \n', end='', flush=True)
                 dir_path = os.path.join('AllClients', str(client_id))
                 dir_path = os.path.join(dir_path, dir_name)
                 os.makedirs(dir_path, exist_ok=True)
@@ -57,7 +67,6 @@ def get_files(get_files_sock):
             filename = line.strip().decode()
             filename = get_path(client_op, filename)
             length = int(get_files_sock.readline())
-            print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
 
             file_path = os.path.join('AllClients', str(client_id))
             file_path = os.path.join(file_path, filename)
@@ -72,13 +81,13 @@ def get_files(get_files_sock):
                         break
                     f.write(data)
                     length -= len(data)
-                else:  # only runs if while doesn't break and length==0
-                    print('Complete')
-                    continue
+                # else:  # only runs if while doesn't break and length==0
+                #     print('Complete')  # debug
+                #     continue
 
-            # socket was closed early.
-            print('Incomplete')
-            break
+            # # socket was closed early.
+            # print('Incomplete')  # debug
+            # break
     get_files_sock.close()
 
 
@@ -157,6 +166,22 @@ def send_file(on_sock, src_path):
                 on_sock.sendall(data)
 
 
+# delete dir recursive
+def delete_dir(path_to_del):
+    if not os.path.exists(path_to_del):
+        return
+    for root, dirs, files in os.walk(path_to_del, topdown=False):
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+    os.rmdir(path_to_del)
+
+
+# Push requests - updates from client: ------------------------------------------------------------------------------
+
 # give the user the computer number of this user
 def get_comp_num(c_id):
     if data_base.keys().__contains__(c_id):  # check if the ID exists in data_base dictionary
@@ -169,9 +194,17 @@ def get_comp_num(c_id):
     return c_comp
 
 
+# update the data_base dictionary with the updates we get from client in push activity
+def update_computers(c_id, c_comp, cmd):
+    for k in data_base[c_id].keys():
+        if k != c_comp:
+            data_base[c_id][k].append(cmd)
+
+
 # the server get update from a client by push command- the server performs the operation by the command it get
 def get_update(c_command, data_sock):
     global server_has_changed
+
     if c_command[0] == "created":
         is_dir, src_path = c_command[1], c_command[2]
         src_path = os.path.join(clients_id_path[client_id], src_path)
@@ -184,7 +217,7 @@ def get_update(c_command, data_sock):
         if is_dir == "True":
             os.makedirs(src_path)  # create the dir
         elif is_dir == "False":
-            get_file(data_sock, src_path) # get the file we need to create from the client
+            get_file(data_sock, src_path)  # get the file we need to create from the client
 
     elif c_command[0] == "deleted":
         is_dir, del_path = c_command[1], c_command[2]
@@ -204,6 +237,7 @@ def get_update(c_command, data_sock):
         is_dir, src_path, dest_path = c_command[1], c_command[2], c_command[3]
         src_path = get_path(client_op, src_path)
         dest_path = get_path(client_op, dest_path)
+
         src_path = os.path.join(clients_id_path[client_id], src_path)
         dest_path = os.path.join(clients_id_path[client_id], dest_path)
         # check if the "moved" operation is already made- to avoid duplications:
@@ -221,26 +255,7 @@ def get_update(c_command, data_sock):
                 os.makedirs(dest_path)
 
 
-# update the data_base dictionary with the updates we get from client in push activity
-def update_computers(c_id, c_comp, cmd):
-    for k in data_base[c_id].keys():
-        if k != c_comp:
-            data_base[c_id][k].append(cmd)
-
-
-# delete dir recursive
-def delete_dir(path_to_del):
-    if not os.path.exists(path_to_del):
-        return
-    for root, dirs, files in os.walk(path_to_del, topdown=False):
-        for file in files:
-            file_path = os.path.join(root, file)
-            os.remove(file_path)
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            os.rmdir(dir_path)
-    os.rmdir(path_to_del)
-
+# Pull requests - sent updates to Client: ----------------------------------------------------------------------
 
 # send the current update by methods.
 def send_update(cmd, c_path, on_sock):
@@ -255,7 +270,6 @@ def send_update(cmd, c_path, on_sock):
 
 def notify_created(curr_update, c_path, on_sock):
     mode, is_dir, new_path = curr_update.split(',')
-    print(curr_update)
     with on_sock:
         on_sock.sendall(curr_update.encode() + b'\n')
         if is_dir == "False":
@@ -264,81 +278,81 @@ def notify_created(curr_update, c_path, on_sock):
 
 
 def notify_deleted(curr_update, on_sock):
-    print(curr_update)
     with on_sock:
         on_sock.sendall(curr_update.encode() + b'\n')
 
 
 def notify_moved(curr_update, on_sock):
-    print(curr_update)
     with on_sock:
         on_sock.sendall(curr_update.encode() + b'\n')
 
 
+# -------------------------------------------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    # make folder to store all clients data
+    # Makes folder to store all clients data
     server_dir = os.getcwd()
     allClients = os.path.join(server_dir, 'AllClients')
     os.mkdir(allClients)
 
     while True:
-        print('Waiting for a client...')
+        # Waiting for client:
         client_socket, address = main_socket.accept()
-        get_data_sock = client_socket.makefile(mode='rb')
+        get_data_sock = client_socket.makefile(mode='rb')  # client joined- reading client socket by bytes
 
-        print(f'Client joined from {address}')
-        # identification - get client's ID, computer number, op.
-        client_id = get_data_sock.readline().strip().decode()
-        client_comp = get_data_sock.readline().strip().decode()
-        client_op = get_data_sock.readline().strip().decode()
+        # identification - get client's ID, computer number, operation system.
+        client_id = get_data_sock.readline().strip().decode()  # get from client his ID
+        client_comp = get_data_sock.readline().strip().decode()  # get from client his computer number
+        client_op = get_data_sock.readline().strip().decode()  # get from client his op = operation system
 
         client_dir_path = ''
-        if client_id == 'None':
+
+        # Connection between Client and Server for the first time:-----------------------------------------------
+        if client_id == 'None':  # if client assign without ID
             client_id = get_random_id(clients_id_path.keys())  # create client id
-            client_comp = get_comp_num(client_id)  # also update the database
-            client_socket.sendall(client_id.encode() + b'\n')
+            client_comp = get_comp_num(client_id)  # give the client comp_num = '1', also update the database
+            client_socket.sendall(client_id.encode() + b'\n')  # send new ID
             client_socket.sendall(client_comp.encode() + b'\n')  # send new Computer number (will be 1).
             client_socket.sendall(sys.platform.encode() + b'\n')  # send server op.
 
-            # create & enter his folder name to the dictionary
+            # create & enter his folder name to the dictionary by ID
             os.mkdir(os.path.join(allClients, client_id))
             clients_id_path[client_id] = os.path.join(allClients, client_id)
 
-            # get files to server.
+            # Init: get files to server:
             get_files(get_data_sock)
 
-        # ID exists:
-        else:
+        else:  # ID exists:
             client_dir_path = clients_id_path[client_id]  # search for path in AllClients folders
-            if client_comp == "-1":
+            if client_comp == "-1":  # default for new computer
                 client_comp = get_comp_num(client_id)  # also update the database
                 client_socket.sendall(client_comp.encode() + b'\n')  # send new Computer number
                 client_socket.sendall(sys.platform.encode() + b'\n')  # send server op name.
                 send_files(client_socket, client_dir_path)
 
-            # computer reconnect with id and comp number:
+            # Connection reconnect between Client and Server for pull or push:------------------------------------
             else:
+                # Get connection type - Push or Pull:
                 connection_type = get_data_sock.readline().strip().decode()
-                if connection_type == "pull":
-                    # already signed computer - check if there are updates:
+
+                if connection_type == "pull":  # client asks for updates
+                    # Check if there are updates:
                     if data_base[client_id][client_comp]:  # check if there are updates
+                        # get num of updates for current computer:
                         status = str(len(data_base[client_id][client_comp])) + " To go!"
                         client_socket.sendall(status.encode() + b'\n')
-                        update = data_base[client_id][client_comp].pop(0)
-                        print(status)
-                        print(update)
+                        update = data_base[client_id][client_comp].pop(0)  # get update from data_base dictionary
                         send_update(update, client_dir_path, client_socket)
-                        # TODO: share the updates to this computer
-                    else:
+
+                    else:  # there are no updates for this computer
                         client_socket.sendall("No updates".encode() + b'\n')
 
-                elif connection_type == "push":
-                    # waiting for updates
-                    command_txt = get_data_sock.readline().strip().decode()
+                elif connection_type == "push":  # client want to share update (from watchdog)
+                    command_txt = get_data_sock.readline().strip().decode()  # get the update line
                     command = str(command_txt).split(',')
-                    get_update(command, get_data_sock)
-                    if server_has_changed:
+                    get_update(command, get_data_sock)  # deal with the updates
+
+                    if server_has_changed:  # global var - checks if the update wasn't duplicate
                         command[2] = get_path(client_op, command[2])
                         if command[0] == "moved":
                             command[3] = get_path(client_op, command[3])
