@@ -10,7 +10,6 @@ port = int(sys.argv[1])
 clients_id_path = {}  # create dictionary that maps id to path in the server.
 data_base = {}
 server_has_changed = True  # global var that check if the server has been changed from last push request.
-my_ops = os.name
 # open server
 main_socket = socket()
 main_socket.bind(('', port))
@@ -27,19 +26,11 @@ def get_path(src_platform, src_path, src_sep='/'):
     return src_path
 
 
-# def get_path(src_platform, src_path):
-#     if src_path.__contains__('\\') and my_ops == "posix":
-#         src_path = src_path.replace('\\', '/')
-#     elif src_path.__contains__('/') and my_ops == "nt":
-#         src_path = src_path.replace('/', '\\')
-#         return src_path
-
-# TODO change id length to 128 characters
 # return random string with 128 characters compared of letters and numbers.
 def get_random_id(id_set):
-    new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=128))
     while new_id in id_set:
-        new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+        new_id = ''.join(random.choices(string.ascii_letters + string.digits, k=128))
     return new_id
 
 
@@ -91,20 +82,18 @@ def get_files(get_files_sock):
     get_files_sock.close()
 
 
-# This function send to new client with id the dirs and files in client path
-def send_files(on_sock, src_path):  # type - socket #send file and empty dirs
+# This function send to new client with id the dirs and files in client path (including empty files)
+def send_files(on_sock, src_path):
     with on_sock:
         for root, dirs, files in os.walk(src_path):
             for file in files:
                 filename = os.path.join(root, file)
                 relpath = os.path.relpath(filename, src_path)  # get file name from my_dir (file path)
-                filesize = os.path.getsize(filename)
-
-                print(f'Sending {relpath}')
+                file_size = os.path.getsize(filename)
 
                 with open(filename, 'rb') as f:
                     on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
-                    on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
+                    on_sock.sendall(str(file_size).encode() + b'\n')  # send file size.
 
                     # Send the file in chunks so large files can be handled.
                     while True:
@@ -113,25 +102,26 @@ def send_files(on_sock, src_path):  # type - socket #send file and empty dirs
                             break
                         on_sock.sendall(data)
 
-        # sending empty directories.
+        # sending empty directories:
         on_sock.sendall("empty dirs:".encode('utf-8') + b'\n')
         for root, dirs, files in os.walk(src_path):
             for directory in dirs:
                 d = os.path.join(root, directory)
                 if not os.listdir(d):
                     d = os.path.relpath(d, src_path)
-                    print(d)
                     on_sock.sendall(d.encode() + b'\n')
         on_sock.sendall('Done.'.encode() + b'\n')
         on_sock.close()
 
 
+# creates the dirs by recursive in destination path
 def create_dirs(d_path):
     if not os.path.exists(d_path):
         create_dirs(os.path.dirname(d_path))
         os.mkdir(d_path)
 
 
+# get a file from client and create it and it path in server path for this client
 def get_file(on_socket, file_path):  # type - makefile('rb')
     file_name = on_socket.readline()
     length = int(on_socket.readline())
@@ -144,21 +134,20 @@ def get_file(on_socket, file_path):  # type - makefile('rb')
                 break
             f.write(data)
             length -= len(data)
-        else:  # only runs if while doesn't break and length==0
-            print('Complete')
+        # else:  # only runs if while doesn't break and length==0
+        #     print('Complete')
 
 
+# send to client a file
 def send_file(on_sock, src_path):
     with on_sock:
         filename = src_path
         relpath = os.path.basename(filename)  # get file name from my_dir (file path)
-        filesize = os.path.getsize(filename)
-
-        print(f'Sending {relpath}')
+        file_size = os.path.getsize(filename)
 
         with open(filename, 'rb') as f:
             on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
-            on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
+            on_sock.sendall(str(file_size).encode() + b'\n')  # send file size.
 
             # Send the file in chunks so large files can be handled.
             while True:
@@ -170,70 +159,76 @@ def send_file(on_sock, src_path):
 
 # give the user the computer number of this user
 def get_comp_num(c_id):
-    if data_base.keys().__contains__(c_id):  # check if the ID exists
+    if data_base.keys().__contains__(c_id):  # check if the ID exists in data_base dictionary
         c_comp = str(len(data_base[c_id]) + 1)
-        data_base[c_id][c_comp] = list()  # new computer has joined the data base.
-    else:
+        data_base[c_id][c_comp] = list()  # new computer has joined the data_base for this id.
+    else:  # new computer for this id
         c_comp = "1"
         data_base[c_id] = {}
         data_base[c_id][c_comp] = list()
     return c_comp
 
 
-def get_update(command, get_data_sock):
+# the server get update from a client by push command- the server performs the operation by the command it get
+def get_update(c_command, data_sock):
     global server_has_changed
-    if command[0] == "created":
-        is_dir, src_path = command[1], command[2]
+    if c_command[0] == "created":
+        is_dir, src_path = c_command[1], c_command[2]
         src_path = os.path.join(clients_id_path[client_id], src_path)
         src_path = get_path(client_op, src_path)
-        if os.path.exists(src_path):
+        if os.path.exists(src_path):  # check if the "create" operation is already made- to avoid duplications.
             server_has_changed = False
             return
-        server_has_changed = True
-        if is_dir == "True":
-            os.makedirs(src_path)
-            print("created dir")
-        elif is_dir == "False":
-            get_file(get_data_sock, src_path)
 
-    elif command[0] == "deleted":
-        is_dir, del_path = command[1], command[2]
-        del_path = os.path.join(clients_id_path[client_id], del_path)
-        if not os.path.exists(del_path):
-            server_has_changed = False
-            return
         server_has_changed = True
         if is_dir == "True":
-            delete_dir(del_path)
+            os.makedirs(src_path)  # create the dir
+        elif is_dir == "False":
+            get_file(data_sock, src_path) # get the file we need to create from the client
+
+    elif c_command[0] == "deleted":
+        is_dir, del_path = c_command[1], c_command[2]
+        del_path = os.path.join(clients_id_path[client_id], del_path)
+        if not os.path.exists(del_path):  # check if the "delete" operation is already made- to avoid duplications.
+            server_has_changed = False
+            return
+
+        server_has_changed = True
+        if is_dir == "True":
+            delete_dir(del_path)  # delete dir and all it's recursive dirs too
         else:
             if os.path.exists(del_path):
                 os.remove(del_path)
 
-    elif command[0] == "moved":
-        is_dir, src_path, dest_path = command[1], command[2], command[3]
+    elif c_command[0] == "moved":
+        is_dir, src_path, dest_path = c_command[1], c_command[2], c_command[3]
         src_path = get_path(client_op, src_path)
         dest_path = get_path(client_op, dest_path)
         src_path = os.path.join(clients_id_path[client_id], src_path)
         dest_path = os.path.join(clients_id_path[client_id], dest_path)
+        # check if the "moved" operation is already made- to avoid duplications:
         if not os.path.exists(src_path) and os.path.exists(dest_path):
             server_has_changed = False
             return
+
         server_has_changed = True
         if is_dir == "False":
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)  # create the path we need to create the file
             os.replace(src_path, dest_path)
-        else:
+        else:  # delete from source path and create the dir in destination path
             delete_dir(src_path)
             if not os.path.exists(dest_path):
                 os.makedirs(dest_path)
 
 
+# update the data_base dictionary with the updates we get from client in push activity
 def update_computers(c_id, c_comp, cmd):
     for k in data_base[c_id].keys():
         if k != c_comp:
             data_base[c_id][k].append(cmd)
 
 
+# delete dir recursive
 def delete_dir(path_to_del):
     if not os.path.exists(path_to_del):
         return
@@ -247,6 +242,7 @@ def delete_dir(path_to_del):
     os.rmdir(path_to_del)
 
 
+# send the current update by methods
 def send_update(cmd, c_path, on_sock):
     cmd_type = cmd.split(',', 1)[0]
     if cmd_type == "created":
