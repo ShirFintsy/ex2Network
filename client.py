@@ -14,7 +14,8 @@ server_port = int(sys.argv[2])
 path = sys.argv[3]
 time_cycle = int(sys.argv[4])
 client_id = ''
-server_op = 'linux'  # The server will override this value.
+server_op = os.name
+my_ops = os.name
 client_comp = "-1"
 
 # If the client has no id - then he will send 'False' to the server - which means he is a new client.
@@ -34,6 +35,13 @@ def get_path(src_platform, src_path, src_sep='/'):
     if os.sep != src_sep:
         src_path = src_path.replace(src_sep, os.sep)
     return src_path
+
+# def get_path(src_platform, src_path):
+#     if src_path.__contains__('\\') and my_ops == "posix":
+#         src_path = src_path.replace('\\', '/')
+#     elif src_path.__contains__('/') and my_ops == "nt":
+#         src_path = src_path.replace('/', '\\')
+#         return src_path
 
 
 # We use the socket to make push/pull request. we always Identify: --------------------------------------------
@@ -164,7 +172,7 @@ def send_file(on_sock, src_path):
                 on_sock.sendall(data)
 
 
-# Observer - check for changes:
+# Observer - check for changes: ------------------------------------------------------------------------------------
 
 def on_any_event(event):
     src_path = os.path.relpath(event.src_path, path)  # get relative path
@@ -183,6 +191,14 @@ def notify_server(event, event_type, src_path):
     if event_type == "moved":
         dest_path = os.path.relpath(event.dest_path, path)  # get relative path
         notify_moved(event.is_directory, src_path, dest_path)
+
+    if event_type == "modified":
+        print(f'dir:{event.is_directory}')
+        if not event.is_directory:
+            notify_deleted(False, src_path)
+            notify_created(False, src_path)
+
+
 
 
 def notify_created(is_dir, new_path):
@@ -241,43 +257,45 @@ def pull():
 
 
 def get_update(cmd, on_sock):
-    print(f'command: {cmd}')
     if cmd[0] == "created":
         is_dir, src_path = cmd[1], cmd[2]
         src_path = os.path.join(path, src_path)
+        src_path = get_path(server_op, src_path)
         if os.path.exists(src_path):
             return
-        if is_dir == "True" and not os.path.exists(src_path):
-            os.mkdir(src_path)
+        if is_dir == "True":
+            os.makedirs(src_path)
             print("created dir")
         elif is_dir == "False":
             get_file(on_sock, src_path)
 
     elif cmd[0] == "deleted":
         is_dir, del_path = cmd[1], cmd[2]
+        del_path = get_path(server_op, del_path)
         del_path = os.path.join(path, del_path)
         if not os.path.exists(del_path):
             return
         if is_dir == "True":
-            if os.listdir(del_path):
-                print("error")
-            os.rmdir(del_path)
+            delete_dir(del_path)
         else:
-            os.remove(del_path)
+            if os.path.exists(del_path):
+                os.remove(del_path)
 
     elif cmd[0] == "moved":
         is_dir, src_path, dest_path = cmd[1], cmd[2], cmd[3]
         src_path = os.path.join(path, src_path)
+        src_path = get_path(server_op, src_path)
         dest_path = os.path.join(path, dest_path)
-        # if os.path.exists(dest_path) and not os.path.exists(src_path):
-        #     return
+        dest_path = get_path(server_op, dest_path)
+        if not os.path.exists(src_path) and os.path.exists(dest_path):
+            return
         if is_dir == "False":
             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             os.replace(src_path, dest_path)
         else:
             delete_dir(src_path)
             if not os.path.exists(dest_path):
-                os.mkdir(dest_path)
+                os.makedirs(dest_path)
 
 
 def get_file(on_socket, file_path):  # type - makefile('rb')

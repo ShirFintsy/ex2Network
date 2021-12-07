@@ -49,7 +49,7 @@ def on_any_event(event):
 
 
 if __name__ == "__main__":
-
+    print(os.name)
     patterns = ["*"]  # contains the file patterns we want to handle (in my scenario, I will handle all the files)
     ignore_patterns = None  # contains the patterns that we don’t want to handle.
     ignore_directories = False  # a boolean that we set to True if we want to be notified just for regu
