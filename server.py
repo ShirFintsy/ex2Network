@@ -242,7 +242,7 @@ def delete_dir(path_to_del):
     os.rmdir(path_to_del)
 
 
-# send the current update by methods
+# send the current update by methods.
 def send_update(cmd, c_path, on_sock):
     cmd_type = cmd.split(',', 1)[0]
     if cmd_type == "created":
