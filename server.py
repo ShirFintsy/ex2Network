@@ -4,7 +4,7 @@ import sys
 import random
 import string
 
-CHUNKSIZE = 1_000_000
+CHUNKSIZE = 10_000_000
 port = int(sys.argv[1])
 
 clients_id_path = {}  # create dictionary that maps id to path in the server.

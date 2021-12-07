@@ -7,7 +7,7 @@ from watchdog.events import PatternMatchingEventHandler
 
 # Globals: -----------------------------------------------------------------------------------------------
 
-CHUNKSIZE = 1_000_000
+CHUNKSIZE = 10_000_000
 
 server_ip = sys.argv[1]
 server_port = int(sys.argv[2])
