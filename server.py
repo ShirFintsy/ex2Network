@@ -81,13 +81,9 @@ def get_files(get_files_sock):
                         break
                     f.write(data)
                     length -= len(data)
-                # else:  # only runs if while doesn't break and length==0
-                #     print('Complete')  # debug
-                #     continue
+                else:  # only runs if while doesn't break and length==0
+                    continue
 
-            # # socket was closed early.
-            # print('Incomplete')  # debug
-            # break
     get_files_sock.close()
 
 
