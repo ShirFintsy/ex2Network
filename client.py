@@ -130,9 +130,8 @@ def get_files(get_files_sock):
                         break
                     f.write(data)
                     length -= len(data)
-                # else:  # only runs if while doesn't break and length==0 # debug
-                #     print('Complete')
-                #     continue
+                else:  # only runs if while doesn't break and length==0 # debug
+                    continue
 
             # socket was closed early.
             # print('Incomplete') # debug
@@ -172,8 +171,6 @@ def get_file(on_socket, file_path):  # type - makefile('rb')
                 break
             f.write(data)
             length -= len(data)
-        # else:  # only runs if while doesn't break and length==0
-        #     print('Complete')  # debug
 
 
 # creates the dirs by recursive in destination path
