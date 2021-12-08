@@ -36,6 +36,13 @@ def get_path(src_platform, src_path, src_sep='/'):
         src_path = src_path.replace(src_sep, os.sep)
     return src_path
 
+# def get_path(src_platform, src_path):
+#     if src_path.__contains__('\\') and my_ops == "posix":
+#         src_path = src_path.replace('\\', '/')
+#     elif src_path.__contains__('/') and my_ops == "nt":
+#         src_path = src_path.replace('/', '\\')
+#         return src_path
+
 
 # We use the socket to make push/pull request. we always Identify: --------------------------------------------
 
@@ -72,11 +79,13 @@ def send_files(on_sock, src_path):
             for file in files:
                 filename = os.path.join(root, file)
                 relpath = os.path.relpath(filename, src_path)  # get file name from my_dir (file path)
-                file_size = os.path.getsize(filename)
+                filesize = os.path.getsize(filename)
+
+                print(f'Sending {relpath}')
 
                 with open(filename, 'rb') as f:
                     on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
-                    on_sock.sendall(str(file_size).encode() + b'\n')  # send file size.
+                    on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
 
                     # Send the file in chunks so large files can be handled.
                     while True:
@@ -92,10 +101,11 @@ def send_files(on_sock, src_path):
                 d = os.path.join(root, directory)
                 if not os.listdir(d):
                     d = os.path.relpath(d, src_path)
+                    print(d)
                     on_sock.sendall(d.encode() + b'\n')
+        print('Done.')
 
 
-# create all files and dirs from server
 def get_files(get_files_sock):
     line = " "
     while True:
@@ -111,12 +121,14 @@ def get_files(get_files_sock):
                     break
                 dir_name = line.strip().decode()
                 dir_name = get_path(server_op, dir_name)
+                print(f'empty dir {dir_name} ... \n', end='', flush=True)
                 dir_path = os.path.join(path, dir_name)
                 os.makedirs(dir_path, exist_ok=True)
         else:
             filename = line.strip().decode()
             filename = get_path(server_op, filename)
             length = int(get_files_sock.readline())
+            print(f'Downloading {filename}...\n  Expecting {length:,} bytes...', end='', flush=True)
 
             file_path = os.path.join(path, filename)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -130,26 +142,27 @@ def get_files(get_files_sock):
                         break
                     f.write(data)
                     length -= len(data)
-                # else:  # only runs if while doesn't break and length==0 # debug
-                #     print('Complete')
-                #     continue
+                else:  # only runs if while doesn't break and length==0
+                    print('Complete')
+                    continue
 
             # socket was closed early.
-            # print('Incomplete') # debug
+            print('Incomplete')
             break
     get_files_sock.close()
 
 
-# send one file by chunks of bytes to server
 def send_file(on_sock, src_path):
     with on_sock:
         filename = src_path
         relpath = os.path.basename(filename)  # get file name from my_dir (file path)
-        file_size = os.path.getsize(filename)
+        filesize = os.path.getsize(filename)
+
+        print(f'Sending {relpath}')
 
         with open(filename, 'rb') as f:
             on_sock.sendall(relpath.encode() + b'\n')  # send file name + subdirectory and '\n'.
-            on_sock.sendall(str(file_size).encode() + b'\n')  # send file size.
+            on_sock.sendall(str(filesize).encode() + b'\n')  # send file size.
 
             # Send the file in chunks so large files can be handled.
             while True:
@@ -159,48 +172,9 @@ def send_file(on_sock, src_path):
                 on_sock.sendall(data)
 
 
-# get a file from client and create it and it path in server path for this client
-def get_file(on_socket, file_path):  # type - makefile('rb')
-    file_name = on_socket.readline()
-    length = int(on_socket.readline())
-    create_dirs(os.path.dirname(file_path))
-    with open(file_path, 'wb') as f:
-        while length:
-            chunk = min(length, CHUNKSIZE)
-            data = on_socket.read(chunk)
-            if not data:
-                break
-            f.write(data)
-            length -= len(data)
-        # else:  # only runs if while doesn't break and length==0
-        #     print('Complete')  # debug
-
-
-# creates the dirs by recursive in destination path
-def create_dirs(d_path):
-    if not os.path.exists(d_path):
-        create_dirs(os.path.dirname(d_path))
-        os.mkdir(d_path)
-
-
-# delete dir recursive
-def delete_dir(path_to_del):
-    if not os.path.exists(path_to_del):
-        return
-    for root, dirs, files in os.walk(path_to_del, topdown=False):
-        for file in files:
-            file_path = os.path.join(root, file)
-            os.remove(file_path)
-        for dir in dirs:
-            dir_path = os.path.join(root, dir)
-            os.rmdir(dir_path)
-    os.rmdir(path_to_del)
-
-
 # Observer - check for changes: ------------------------------------------------------------------------------------
 
 def on_any_event(event):
-    pull()
     src_path = os.path.relpath(event.src_path, path)  # get relative path
     notify_server(event, event.event_type, src_path)
 
@@ -218,38 +192,40 @@ def notify_server(event, event_type, src_path):
         dest_path = os.path.relpath(event.dest_path, path)  # get relative path
         notify_moved(event.is_directory, src_path, dest_path)
 
-    if event_type == "modified":  # in case of rename in windows
+    if event_type == "modified":
+        print(f'dir:{event.is_directory}')
         if not event.is_directory:
             notify_deleted(False, src_path)
             notify_created(False, src_path)
 
 
-# send to server the "create" notice by new path
+
+
 def notify_created(is_dir, new_path):
     if os.path.splitext(new_path)[1] == ".swp":
         return
     else:
         sock = get_push_socket()
         curr_update = "created" + ',' + str(is_dir) + ',' + new_path
+        print(curr_update)
         with sock:
             sock.sendall(curr_update.encode() + b'\n')
-            if not is_dir:  # if we created a file - send the file too
+            if not is_dir:
                 new_path = os.path.join(path, new_path)
                 send_file(sock, new_path)
 
 
-# send to server the "delete" notice by old path
 def notify_deleted(is_dir, old_path):
     if os.path.splitext(old_path)[1] == ".swp":
         notify_file_modified(old_path)
     else:
         sock = get_push_socket()
         curr_update = "deleted" + ',' + str(is_dir) + ',' + old_path
+        print(curr_update)
         with sock:
             sock.sendall(curr_update.encode() + b'\n')
 
 
-# send to server the "moved" notice by source path and destination path
 def notify_moved(is_dir, src_path, dest_path):
     sock = get_push_socket()
     curr_update = "moved" + ',' + str(is_dir) + ',' + src_path + ',' + dest_path
@@ -273,35 +249,34 @@ def pull():
     pull_socket = get_pull_socket()
     update_socket = pull_socket.makefile('rb')
     status = update_socket.readline().strip().decode()
+    print(status)
     if status != "No updates":
         command = update_socket.readline().strip().decode().split(',')
         get_update(command, update_socket)
         pull()
 
 
-# the client got an update from server (another client) the treats it by the update command
 def get_update(cmd, on_sock):
     if cmd[0] == "created":
         is_dir, src_path = cmd[1], cmd[2]
         src_path = os.path.join(path, src_path)
         src_path = get_path(server_op, src_path)
-        if os.path.exists(src_path):  # check if the "create" operation is already made- to avoid duplications.
+        if os.path.exists(src_path):
             return
-
         if is_dir == "True":
             os.makedirs(src_path)
+            print("created dir")
         elif is_dir == "False":
-            get_file(on_sock, src_path)  # get the file we need to create from the server
+            get_file(on_sock, src_path)
 
     elif cmd[0] == "deleted":
         is_dir, del_path = cmd[1], cmd[2]
         del_path = get_path(server_op, del_path)
         del_path = os.path.join(path, del_path)
-        if not os.path.exists(del_path):  # check if the "delete" operation is already made- to avoid duplications.
+        if not os.path.exists(del_path):
             return
-
         if is_dir == "True":
-            delete_dir(del_path)  # delete dir and all it's recursive dirs too
+            delete_dir(del_path)
         else:
             if os.path.exists(del_path):
                 os.remove(del_path)
@@ -310,20 +285,52 @@ def get_update(cmd, on_sock):
         is_dir, src_path, dest_path = cmd[1], cmd[2], cmd[3]
         src_path = os.path.join(path, src_path)
         src_path = get_path(server_op, src_path)
-
         dest_path = os.path.join(path, dest_path)
         dest_path = get_path(server_op, dest_path)
-        # check if the "moved" operation is already made- to avoid duplications:
         if not os.path.exists(src_path) and os.path.exists(dest_path):
             return
-
         if is_dir == "False":
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)  # create the path we need to create the file
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             os.replace(src_path, dest_path)
-        else:  # delete from source path and create the dir in destination path
+        else:
             delete_dir(src_path)
             if not os.path.exists(dest_path):
                 os.makedirs(dest_path)
+
+
+def get_file(on_socket, file_path):  # type - makefile('rb')
+    file_name = on_socket.readline()
+    length = int(on_socket.readline())
+    create_dirs(os.path.dirname(file_path))
+    with open(file_path, 'wb') as f:
+        while length:
+            chunk = min(length, CHUNKSIZE)
+            data = on_socket.read(chunk)
+            if not data:
+                break
+            f.write(data)
+            length -= len(data)
+        else:  # only runs if while doesn't break and length==0
+            print('Complete')
+
+
+def create_dirs(d_path):
+    if not os.path.exists(d_path):
+        create_dirs(os.path.dirname(d_path))
+        os.mkdir(d_path)
+
+
+def delete_dir(path_to_del):
+    if not os.path.exists(path_to_del):
+        return
+    for root, dirs, files in os.walk(path_to_del, topdown=False):
+        for file in files:
+            file_path = os.path.join(root, file)
+            os.remove(file_path)
+        for dir in dirs:
+            dir_path = os.path.join(root, dir)
+            os.rmdir(dir_path)
+    os.rmdir(path_to_del)
 
 
 # -------------------------------------------------------------------------------------------------------------------
@@ -338,11 +345,14 @@ if __name__ == "__main__":
         client_comp = get_data_sock.readline().strip().decode()  # get new Computer number ("1")
         server_op = get_data_sock.readline().strip().decode()  # get server op name.
         get_data_sock.close()
-        send_files(server_socket, path)  # will send files and close socket - init.
+        print(f"ID: {client_id}")
+        print(f"Computer number:  {client_comp}")
+        send_files(server_socket, path)  # will send files and close socket.
 
     else:
         client_comp = get_data_sock.readline().strip().decode()  # get new Computer number
         server_op = get_data_sock.readline().strip().decode()  # get server op name.
+        print(f"Computer number:  {client_comp}")
         get_files(get_data_sock)  # pull the directory from server, will close makefile object ("get_data_sock").
         server_socket.close()
 
