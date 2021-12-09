@@ -308,6 +308,7 @@ if __name__ == "__main__":
             client_id = get_random_id(clients_id_path.keys())  # create client id
             client_comp = get_comp_num(client_id)  # give the client comp_num = '1', also update the database
             client_socket.sendall(client_id.encode() + b'\n')  # send new ID
+            print(client_id)
             client_socket.sendall(client_comp.encode() + b'\n')  # send new Computer number (will be 1).
             client_socket.sendall(sys.platform.encode() + b'\n')  # send server op.
 
